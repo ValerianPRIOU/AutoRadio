@@ -18,12 +18,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 #include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "../shell/shell.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,7 +34,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_DELAY 1000
+#define TASK_SHELL_STACK_DEPTH 512
+#define TASK_SHELL_PRIORITY 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,19 +46,70 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+TaskHandle_t h_task_shell = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void print(uint8_t msg){
-	HAL_UART_Transmit(&huart2, msg, strlen(msg), MAX_DELAY);
+int __io_putchar(int ch)
+{
+	HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
+	return ch;
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if (huart->Instance == USART2)
+	{
+		shell_uart_receive_irq_cb();	// C'est la fonction qui donne le sémaphore!
+	}
+}
+
+int fonction(int argc, char ** argv)
+{
+	printf("Je suis une fonction bidon\r\n");
+
+	printf("argc = %d\r\n", argc);
+
+	for (int i = 0 ; i < argc ; i++)
+	{
+		printf("arg %d = %s\r\n", i, argv[i]);
+	}
+
+	return 0;
+}
+
+int addition(int argc, char ** argv)
+{
+	if (argc == 3)
+	{
+		int a, b;
+		a = atoi(argv[1]);
+		b = atoi(argv[2]);
+		printf("%d + %d = %d\r\n", a, b, a+b);
+
+		return 0;
+	}
+	else
+	{
+		printf("Erreur, pas le bon nombre d'arguments\r\n");
+		return -1;
+	}
+}
+
+void task_shell(void * unused)
+{
+	shell_init();
+	shell_add('f', fonction, "Une fonction inutile");
+	shell_add('a', addition, "Effectue une somme");
+	shell_run();	// boucle infinie
 }
 /* USER CODE END 0 */
 
@@ -90,10 +143,27 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  print("===== Audio ===== \r\n");
+  printf("===== Audio ===== \r\n");
   HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+	if (xTaskCreate(task_shell, "Shell", TASK_SHELL_STACK_DEPTH, NULL, TASK_SHELL_PRIORITY, &h_task_shell) != pdPASS)
+	{
+		printf("Error creating task shell\r\n");
+		Error_Handler();
+	}
+
+	vTaskStartScheduler();
   /* USER CODE END 2 */
+
+  /* Call init function for freertos objects (in cmsis_os2.c) */
+  MX_FREERTOS_Init();
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
